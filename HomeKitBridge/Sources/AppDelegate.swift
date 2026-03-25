@@ -130,24 +130,41 @@ class AppDelegate: UIResponder, UIApplicationDelegate, HMHomeManagerDelegate {
         let group = DispatchGroup()
         let lock = NSLock()
         var snapshots: [DeviceSnapshot] = []
+        var readFailures: [[String: Any]] = []
 
         for (home, accessory, service, characteristic, roomName) in candidates {
             group.enter()
-            characteristic.readValue { _ in
+            characteristic.readValue { error in
+                var payload: [String: Any] = [
+                    "home": home.name,
+                    "name": accessory.name,
+                    "room": roomName,
+                    "reachable": accessory.isReachable,
+                    "serviceType": service.serviceType
+                ]
+
+                if let error = error {
+                    payload["on"] = NSNull()
+                    payload["readError"] = error.localizedDescription
+                } else {
+                    payload["on"] = characteristic.value as? Bool ?? false
+                }
+
                 let snapshot = DeviceSnapshot(
                     sortKey: "\(home.name)\u{0}\(roomName)\u{0}\(accessory.name)",
-                    payload: [
-                        "home": home.name,
-                        "name": accessory.name,
-                        "room": roomName,
-                        "on": characteristic.value as? Bool ?? false,
-                        "reachable": accessory.isReachable,
-                        "serviceType": service.serviceType
-                    ]
+                    payload: payload
                 )
 
                 lock.lock()
                 snapshots.append(snapshot)
+                if let error = error {
+                    readFailures.append([
+                        "home": home.name,
+                        "name": accessory.name,
+                        "room": roomName,
+                        "message": error.localizedDescription
+                    ])
+                }
                 lock.unlock()
                 group.leave()
             }
@@ -157,7 +174,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, HMHomeManagerDelegate {
             let devices = snapshots
                 .sorted { $0.sortKey < $1.sortKey }
                 .map(\.payload)
-            writeOutput(["ok": true, "devices": devices], to: self.paths.outputURL)
+            writeOutput(["ok": true, "devices": devices, "readFailures": readFailures], to: self.paths.outputURL)
             exit(0)
         }
     }

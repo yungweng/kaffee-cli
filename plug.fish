@@ -50,10 +50,17 @@ if 'error' in data:
     sys.exit(1)
 show_home = len({d.get('home', '') for d in data['devices']}) > 1
 for d in sorted(data['devices'], key=lambda x: (x.get('home', ''), x['room'], x['name'])):
-    icon = '🟢' if d['on'] else '⚫'
+    on = d.get('on')
+    if on is True:
+        icon = '🟢'
+    elif on is False:
+        icon = '⚫'
+    else:
+        icon = '❔'
     reach = '' if d['reachable'] else ' (nicht erreichbar)'
+    read_error = f\" [Status unbekannt: {d['readError']}]\" if d.get('readError') else ''
     location = f\"{d.get('home', '')} / {d['room']}\" if show_home else d['room']
-    print(f'{icon} {location:25s} {d[\"name\"]}{reach}')
+    print(f'{icon} {location:25s} {d[\"name\"]}{reach}{read_error}')
 " $out_file
         set -l status $status
         _plug_cleanup $tmp_dir
@@ -102,9 +109,19 @@ with open(sys.argv[1], encoding='utf-8') as f:
 if 'error' in data:
     print(f'error:{data.get(\"message\", data[\"error\"])}')
     sys.exit(0)
-on = data.get('on', False)
+on = data.get('on')
+if not isinstance(on, bool):
+    print('missing or invalid on state', file=sys.stderr)
+    sys.exit(1)
 print(f'ok:{\"on\" if on else \"off\"}')
 " $out_file)
+    set -l parse_status $status
+
+    if test $parse_status -ne 0
+        echo "Fehler: Ungueltige Antwort von HomeKitBridge" >&2
+        _plug_cleanup $tmp_dir
+        return 1
+    end
 
     if string match -q 'error:*' $result
         echo "Fehler: "(string replace 'error:' '' $result) >&2
@@ -222,7 +239,7 @@ function _plug_run_bridge
         return 1
     end
 
-    command open -gj "$app_path" --args "$cmd_file" "$out_file" >/dev/null 2>&1
+    command open -gnj "$app_path" --args "$cmd_file" "$out_file" >/dev/null 2>&1
     or return 1
 
     _plug_wait_output "$out_file"
