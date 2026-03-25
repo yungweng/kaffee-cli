@@ -6,6 +6,12 @@ function plug --description "HomeKit Smart Plugs steuern"
         return 1
     end
 
+    set app_path (_plug_normalize_app_path "$app_path")
+    if test -z "$app_path"
+        echo "Fehler: HomeKitBridge.app nicht gefunden: $app_path" >&2
+        return 1
+    end
+
     if not test -d "$app_path"
         echo "Fehler: HomeKitBridge.app nicht gefunden: $app_path" >&2
         return 1
@@ -136,41 +142,85 @@ with open(path, 'w', encoding='utf-8') as f:
 end
 
 function _plug_find_app
-    set -l app_suffix HomeKitBridge/build/DerivedData/Build/Products/Debug-maccatalyst/HomeKitBridge.app
+    set -l local_app_suffix HomeKitBridge/build/DerivedData/Build/Products/Debug-maccatalyst/HomeKitBridge.app
+    set -l global_app_glob "*/HomeKitBridge-*/Build/Products/Debug-maccatalyst/HomeKitBridge.app"
 
     if set -q KAFFEE_HOMEKITBRIDGE_APP
-        if test -d "$KAFFEE_HOMEKITBRIDGE_APP"
-            echo "$KAFFEE_HOMEKITBRIDGE_APP"
+        set -l env_app (_plug_normalize_app_path "$KAFFEE_HOMEKITBRIDGE_APP")
+        if test -n "$env_app"
+            echo "$env_app"
             return 0
         end
     end
 
-    set -l search_roots $PWD (status dirname) (dirname (functions -D plug)) $HOME
+    set -l search_roots \
+        $PWD \
+        (status dirname) \
+        (dirname (functions -D plug)) \
+        (realpath (status dirname)/..) \
+        $HOME
+
     for root in $search_roots
         if not test -d "$root"
             continue
         end
 
-        set -l candidate "$root/$app_suffix"
-        if test -d "$candidate"
+        set -l candidate (_plug_normalize_app_path "$root/$local_app_suffix")
+        if test -n "$candidate"
             echo "$candidate"
             return 0
         end
 
-        set -l nested_candidate (find "$root" -path "*/$app_suffix" -print -quit 2>/dev/null)
+        set -l nested_candidate (find "$root" -path "*/$local_app_suffix" -print -quit 2>/dev/null)
+        set nested_candidate (_plug_normalize_app_path "$nested_candidate")
         if test -n "$nested_candidate"
             echo "$nested_candidate"
             return 0
         end
     end
 
-    find ~/Library/Developer/Xcode/DerivedData -path "*/HomeKitBridge-*/Build/Products/Debug-maccatalyst/HomeKitBridge.app" -maxdepth 5 2>/dev/null | head -1
+    set -l xcode_candidate (find ~/Library/Developer/Xcode/DerivedData -path $global_app_glob -maxdepth 5 -print -quit 2>/dev/null)
+    _plug_normalize_app_path "$xcode_candidate"
+end
+
+function _plug_normalize_app_path
+    set -l candidate $argv[1]
+    if test -z "$candidate"
+        return 1
+    end
+
+    if string match -q "*.app" "$candidate"
+        if test -d "$candidate"
+            echo "$candidate"
+            return 0
+        end
+
+        return 1
+    end
+
+    if string match -q "*/Contents/MacOS/*" "$candidate"
+        set -l bundle_path (dirname (dirname (dirname "$candidate")))
+    else
+        return 1
+    end
+
+    if test -d "$bundle_path"
+        echo "$bundle_path"
+        return 0
+    end
+
+    return 1
 end
 
 function _plug_run_bridge
     set -l app_path $argv[1]
     set -l cmd_file $argv[2]
     set -l out_file $argv[3]
+
+    set app_path (_plug_normalize_app_path "$app_path")
+    if test -z "$app_path"
+        return 1
+    end
 
     command open -gj "$app_path" --args "$cmd_file" "$out_file" >/dev/null 2>&1
     or return 1
