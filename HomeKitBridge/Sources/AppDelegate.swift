@@ -89,6 +89,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, HMHomeManagerDelegate {
         return true
     }
 
+    // Prevent Mac Catalyst from creating a default UIWindow
+    func application(
+        _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        let config = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
+        config.delegateClass = HeadlessSceneDelegate.self
+        return config
+    }
+
     func homeManagerDidUpdateHomes(_ manager: HMHomeManager) {
         log("Homes loaded: \(manager.homes.count)")
 
@@ -315,4 +326,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, HMHomeManagerDelegate {
         }
         return nil
     }
+}
+
+// MARK: - Headless scene delegate (no window)
+
+class HeadlessSceneDelegate: UIResponder, UIWindowSceneDelegate {
+    // Intentionally empty — prevents Mac Catalyst from creating a default window.
 }

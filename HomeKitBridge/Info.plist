@@ -20,6 +20,13 @@
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
     <key>LSUIElement</key>
     <true/>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+        <key>UISceneConfigurations</key>
+        <dict/>
+    </dict>
     <key>NSHomeKitUsageDescription</key>
     <string>HomeKitBridge needs access to your HomeKit devices to discover and list them.</string>
 </dict>

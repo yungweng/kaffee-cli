@@ -30,6 +30,12 @@ echo "  plug.fish    -> $FISH_FUNCTIONS_DIR/plug.fish"
 echo "  kaffee.fish  -> $FISH_FUNCTIONS_DIR/kaffee.fish"
 echo ""
 
+# 3. Fish universal variable setzen, damit plug die App von überall findet
+echo "==> KAFFEE_HOMEKITBRIDGE_APP setzen..."
+fish -c "set -U KAFFEE_HOMEKITBRIDGE_APP '$APP_PATH'"
+echo "  KAFFEE_HOMEKITBRIDGE_APP = $APP_PATH"
+echo ""
+
 echo "==> Installation abgeschlossen!"
 echo ""
 echo "Benutzung:"
