@@ -29,4 +29,4 @@ fi
 echo "==> Built app at: $APP_PATH"
 echo ""
 echo "Run with:"
-echo "  \"$APP_PATH/Contents/MacOS/HomeKitBridge\""
+echo "  open -gj \"$APP_PATH\" --args /tmp/homekit-bridge-command.json /tmp/homekit-bridge-output.json"

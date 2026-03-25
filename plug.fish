@@ -6,9 +6,8 @@ function plug --description "HomeKit Smart Plugs steuern"
         return 1
     end
 
-    set -l bridge_bin "$app_path/Contents/MacOS/HomeKitBridge"
-    if not test -x "$bridge_bin"
-        echo "Fehler: HomeKitBridge Binary nicht gefunden: $bridge_bin" >&2
+    if not test -d "$app_path"
+        echo "Fehler: HomeKitBridge.app nicht gefunden: $app_path" >&2
         return 1
     end
 
@@ -29,9 +28,7 @@ function plug --description "HomeKit Smart Plugs steuern"
             return 1
         end
 
-        "$bridge_bin" $cmd_file $out_file >/dev/null 2>&1
-
-        if not test -f $out_file
+        _plug_run_bridge "$app_path" "$cmd_file" "$out_file"; or begin
             echo "Fehler: Keine Antwort von HomeKitBridge" >&2
             _plug_cleanup $tmp_dir
             return 1
@@ -85,9 +82,7 @@ for d in sorted(data['devices'], key=lambda x: (x.get('home', ''), x['room'], x[
         return 1
     end
 
-    "$bridge_bin" $cmd_file $out_file >/dev/null 2>&1
-
-    if not test -f $out_file
+    _plug_run_bridge "$app_path" "$cmd_file" "$out_file"; or begin
         echo "Fehler: Keine Antwort von HomeKitBridge" >&2
         _plug_cleanup $tmp_dir
         return 1
@@ -172,17 +167,34 @@ function _plug_find_app
     find ~/Library/Developer/Xcode/DerivedData -path "*/HomeKitBridge-*/Build/Products/Debug-maccatalyst/HomeKitBridge.app" -maxdepth 5 2>/dev/null | head -1
 end
 
+function _plug_run_bridge
+    set -l app_path $argv[1]
+    set -l cmd_file $argv[2]
+    set -l out_file $argv[3]
+
+    command open -gj "$app_path" --args "$cmd_file" "$out_file" >/dev/null 2>&1
+    or return 1
+
+    _plug_wait_output "$out_file"
+end
+
+function _plug_wait_output
+    set -l out_file $argv[1]
+    set -l max_attempts 120
+
+    for _ in (seq $max_attempts)
+        if test -s "$out_file"
+            return 0
+        end
+
+        sleep 0.1
+    end
+
+    return 1
+end
+
 function _plug_cleanup
     if set -q argv[1]; and test -n "$argv[1]"
         rm -rf $argv[1]
-    end
-end
-
-# Convenience aliases
-function kaffee --description "Kaffeemaschine steuern"
-    if not set -q argv[1]
-        plug Kaffee toggle
-    else
-        plug Kaffee $argv[1]
     end
 end
