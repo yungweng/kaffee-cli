@@ -13,37 +13,38 @@ Two-layer design:
 1. **Fish Shell layer** (`plug.fish`, `kaffee.fish`) — user-facing CLI, installed in `~/.config/fish/functions/`
 2. **HomeKitBridge** (`HomeKitBridge/`) — headless Mac Catalyst app that talks to HomeKit via `HMHomeManager`
 
-IPC is file-based JSON over `/tmp`: the fish function writes a command to `/tmp/homekit-bridge-command.json`, launches the app with `open -gj`, and reads the response from `/tmp/homekit-bridge-output.json`.
+IPC is file-based JSON over `/tmp`: the fish function creates a unique temp dir (`/tmp/homekit-bridge.XXXXXX/`), writes a command to `command.json`, launches the app with `open -gnj`, and reads the response from `output.json`. The temp dir is cleaned up after each invocation.
 
 HomeKit on macOS requires a signed `.app` bundle with the `com.apple.developer.homekit` entitlement and a provisioning profile — a plain CLI binary cannot access HomeKit.
 
-## Build
+The app runs completely headless: `LSUIElement=true` hides the Dock icon, an empty `UIApplicationSceneManifest` with a `HeadlessSceneDelegate` prevents any window from appearing.
+
+## Build & Install
 
 Requires: Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen), Apple Developer account with HomeKit capability registered for `de.gmx.ywenger.HomeKitBridge`.
 
+Full install (build + copy fish functions + set app path):
+```bash
+bash install.sh
+```
+
+Build only:
 ```bash
 cd HomeKitBridge
 bash build.sh
 ```
 
-Or manually:
-```bash
-xcodegen generate
-xcodebuild -project HomeKitBridge.xcodeproj -scheme HomeKitBridge \
-  -destination 'platform=macOS,variant=Mac Catalyst' \
-  -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=S6YY3WWW2B build
-```
+The built app lands in `HomeKitBridge/build/DerivedData/Build/Products/Debug-maccatalyst/HomeKitBridge.app`.
 
-The built app lands in `~/Library/Developer/Xcode/DerivedData/HomeKitBridge-*/Build/Products/Debug-maccatalyst/HomeKitBridge.app`.
+`install.sh` sets the Fish universal variable `KAFFEE_HOMEKITBRIDGE_APP` so that `plug` can find the app from any working directory.
 
-## Install fish functions
+## App discovery
 
-```bash
-cp plug.fish ~/.config/fish/functions/plug.fish
-cp kaffee.fish ~/.config/fish/functions/kaffee.fish
-```
-
-The `_plug_wait_output` helper function also needs to be in `~/.config/fish/functions/`.
+`_plug_find_app` in `plug.fish` searches for `HomeKitBridge.app` in this order:
+1. `$KAFFEE_HOMEKITBRIDGE_APP` env/universal variable (set by `install.sh`)
+2. Relative to `$PWD`, script dir, and function file location
+3. `~/Library/Developer/Xcode/DerivedData`
+4. Broad `$HOME` crawl (slow fallback)
 
 ## Language notes
 
