@@ -62,9 +62,9 @@ for d in sorted(data['devices'], key=lambda x: (x.get('home', ''), x['room'], x[
     location = f\"{d.get('home', '')} / {d['room']}\" if show_home else d['room']
     print(f'{icon} {location:25s} {d[\"name\"]}{reach}{read_error}')
 " $out_file
-        set -l status $status
+        set -l list_status $status
         _plug_cleanup $tmp_dir
-        return $status
+        return $list_status
     end
 
     set -l device $argv[1]
@@ -257,7 +257,7 @@ function _plug_wait_output
     set -l out_file $argv[1]
     set -l max_attempts 120
 
-    for _ in (seq $max_attempts)
+    for attempt in (seq $max_attempts)
         if test -s "$out_file"
             return 0
         end
