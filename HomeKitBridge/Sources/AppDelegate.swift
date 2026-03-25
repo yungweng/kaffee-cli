@@ -331,5 +331,24 @@ class AppDelegate: UIResponder, UIApplicationDelegate, HMHomeManagerDelegate {
 // MARK: - Headless scene delegate (no window)
 
 class HeadlessSceneDelegate: UIResponder, UIWindowSceneDelegate {
-    // Intentionally empty — prevents Mac Catalyst from creating a default window.
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        // Explicitly do nothing — prevents UIKit from creating a default UIWindow.
+        #if targetEnvironment(macCatalyst)
+        if let windowScene = scene as? UIWindowScene {
+            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 1, height: 1)
+            windowScene.sizeRestrictions?.maximumSize = CGSize(width: 1, height: 1)
+        }
+        #endif
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        #if targetEnvironment(macCatalyst)
+        // Hide any windows that Mac Catalyst created despite our best efforts
+        if let windowScene = scene as? UIWindowScene {
+            for window in windowScene.windows {
+                window.isHidden = true
+            }
+        }
+        #endif
+    }
 }
