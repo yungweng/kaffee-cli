@@ -1,0 +1,26 @@
+name: HomeKitBridge
+options:
+  bundleIdPrefix: de.gmx.ywenger
+  deploymentTarget:
+    iOS: "15.0"
+settings:
+  SUPPORTS_MACCATALYST: "YES"
+  DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: "NO"
+  DEVELOPMENT_TEAM: S6YY3WWW2B
+  CODE_SIGN_IDENTITY: "Apple Development"
+  CODE_SIGN_STYLE: Automatic
+targets:
+  HomeKitBridge:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.gmx.ywenger.HomeKitBridge
+        INFOPLIST_FILE: Info.plist
+        CODE_SIGN_ENTITLEMENTS: HomeKitBridge.entitlements
+        SUPPORTS_MACCATALYST: "YES"
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: "NO"
+        TARGETED_DEVICE_FAMILY: "2"
+        GENERATE_INFOPLIST_FILE: "NO"
