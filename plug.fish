@@ -174,8 +174,7 @@ function _plug_find_app
         $PWD \
         (status dirname) \
         (dirname (functions -D plug)) \
-        (realpath (status dirname)/..) \
-        $HOME
+        (realpath (status dirname)/..)
 
     for root in $search_roots
         if not test -d "$root"
@@ -197,7 +196,16 @@ function _plug_find_app
     end
 
     set -l xcode_candidate (find ~/Library/Developer/Xcode/DerivedData -path $global_app_glob -maxdepth 5 -print -quit 2>/dev/null)
-    _plug_normalize_app_path "$xcode_candidate"
+    set xcode_candidate (_plug_normalize_app_path "$xcode_candidate")
+    if test -n "$xcode_candidate"
+        echo "$xcode_candidate"
+        return 0
+    end
+
+    # Fall back to a broad home-directory crawl only after checking the
+    # standard DerivedData location, which is the normal Xcode build path.
+    set -l home_candidate (find "$HOME" -path "*/$local_app_suffix" -print -quit 2>/dev/null)
+    _plug_normalize_app_path "$home_candidate"
 end
 
 function _plug_normalize_app_path
