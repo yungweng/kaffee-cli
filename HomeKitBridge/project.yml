@@ -24,3 +24,12 @@ targets:
         DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: "NO"
         TARGETED_DEVICE_FAMILY: "2"
         GENERATE_INFOPLIST_FILE: "NO"
+schemes:
+  HomeKitBridge:
+    build:
+      targets:
+        HomeKitBridge: all
+    run:
+      config: Debug
+    archive:
+      config: Release

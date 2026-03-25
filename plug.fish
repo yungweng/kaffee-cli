@@ -1,5 +1,5 @@
 function plug --description "HomeKit Smart Plugs steuern"
-    set -l app_path (find ~/Library/Developer/Xcode/DerivedData -path "*/HomeKitBridge-*/Build/Products/Debug-maccatalyst/HomeKitBridge.app" -maxdepth 5 2>/dev/null | head -1)
+    set -l app_path (_plug_find_app)
 
     if test -z "$app_path"
         echo "Fehler: HomeKitBridge.app nicht gefunden. Bitte erst bauen." >&2
@@ -24,16 +24,16 @@ function plug --description "HomeKit Smart Plugs steuern"
     # Usage: plug [device] [an|aus|status|toggle]
     #        plug list
     if not set -q argv[1]; or test "$argv[1]" = list
-        _plug_write_command $cmd_file list; or begin
-            _plug_cleanup $tmp_dir
+        _plug_write_command "$cmd_file" list; or begin
+            _plug_cleanup "$tmp_dir"
             return 1
         end
 
-        "$bridge_bin" $cmd_file $out_file >/dev/null 2>&1
+        "$bridge_bin" "$cmd_file" "$out_file" >/dev/null 2>&1
 
-        if not test -f $out_file
+        if not test -f "$out_file"
             echo "Fehler: Keine Antwort von HomeKitBridge" >&2
-            _plug_cleanup $tmp_dir
+            _plug_cleanup "$tmp_dir"
             return 1
         end
 
@@ -51,9 +51,9 @@ for d in sorted(data['devices'], key=lambda x: (x.get('home', ''), x['room'], x[
     reach = '' if d['reachable'] else ' (nicht erreichbar)'
     location = f\"{d.get('home', '')} / {d['room']}\" if show_home else d['room']
     print(f'{icon} {location:25s} {d[\"name\"]}{reach}')
-" $out_file
+" "$out_file"
         set -l status $status
-        _plug_cleanup $tmp_dir
+        _plug_cleanup "$tmp_dir"
         return $status
     end
 
@@ -66,30 +66,30 @@ for d in sorted(data['devices'], key=lambda x: (x.get('home', ''), x['room'], x[
 
     switch "$action"
         case an on
-            _plug_write_command $cmd_file set $device true
+            _plug_write_command "$cmd_file" set "$device" true
         case aus off
-            _plug_write_command $cmd_file set $device false
+            _plug_write_command "$cmd_file" set "$device" false
         case status get
-            _plug_write_command $cmd_file get $device
+            _plug_write_command "$cmd_file" get "$device"
         case toggle
-            _plug_write_command $cmd_file toggle $device
+            _plug_write_command "$cmd_file" toggle "$device"
         case '*'
             echo "Usage: plug [device] [an|aus|status|toggle]"
             echo "       plug list"
-            _plug_cleanup $tmp_dir
+            _plug_cleanup "$tmp_dir"
             return 1
     end
 
     if test $status -ne 0
-        _plug_cleanup $tmp_dir
+        _plug_cleanup "$tmp_dir"
         return 1
     end
 
-    "$bridge_bin" $cmd_file $out_file >/dev/null 2>&1
+    "$bridge_bin" "$cmd_file" "$out_file" >/dev/null 2>&1
 
-    if not test -f $out_file
+    if not test -f "$out_file"
         echo "Fehler: Keine Antwort von HomeKitBridge" >&2
-        _plug_cleanup $tmp_dir
+        _plug_cleanup "$tmp_dir"
         return 1
     end
 
@@ -103,11 +103,11 @@ if 'error' in data:
     sys.exit(0)
 on = data.get('on', False)
 print(f'ok:{\"on\" if on else \"off\"}')
-" $out_file)
+" "$out_file")
 
     if string match -q 'error:*' $result
         echo "Fehler: "(string replace 'error:' '' $result) >&2
-        _plug_cleanup $tmp_dir
+        _plug_cleanup "$tmp_dir"
         return 1
     end
 
@@ -119,7 +119,7 @@ print(f'ok:{\"on\" if on else \"off\"}')
         echo "⚫ $device aus"
     end
 
-    _plug_cleanup $tmp_dir
+    _plug_cleanup "$tmp_dir"
 end
 
 function _plug_write_command
@@ -140,9 +140,19 @@ with open(path, 'w', encoding='utf-8') as f:
 " $argv
 end
 
+function _plug_find_app
+    set -l local_app (status dirname)/HomeKitBridge/build/DerivedData/Build/Products/Debug-maccatalyst/HomeKitBridge.app
+    if test -d "$local_app"
+        echo "$local_app"
+        return 0
+    end
+
+    find ~/Library/Developer/Xcode/DerivedData -path "*/HomeKitBridge-*/Build/Products/Debug-maccatalyst/HomeKitBridge.app" -maxdepth 5 2>/dev/null | head -1
+end
+
 function _plug_cleanup
     if set -q argv[1]; and test -n "$argv[1]"
-        rm -rf $argv[1]
+        rm -rf "$argv[1]"
     end
 end
 
