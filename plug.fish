@@ -13,7 +13,7 @@ function plug --description "HomeKit Smart Plugs steuern"
     if not set -q argv[1]; or test "$argv[1]" = list
         echo '{"action": "list"}' >$cmd_file
         rm -f $out_file
-        open "$app_path"
+        open -gj "$app_path"
         _plug_wait_output; or return 1
 
         # Pretty-print device list
