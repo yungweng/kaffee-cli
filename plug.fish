@@ -1,35 +1,60 @@
 function plug --description "HomeKit Smart Plugs steuern"
     set -l app_path (find ~/Library/Developer/Xcode/DerivedData -path "*/HomeKitBridge-*/Build/Products/Debug-maccatalyst/HomeKitBridge.app" -maxdepth 5 2>/dev/null | head -1)
-    set -l cmd_file /tmp/homekit-bridge-command.json
-    set -l out_file /tmp/homekit-bridge-output.json
 
     if test -z "$app_path"
         echo "Fehler: HomeKitBridge.app nicht gefunden. Bitte erst bauen." >&2
         return 1
     end
 
+    set -l bridge_bin "$app_path/Contents/MacOS/HomeKitBridge"
+    if not test -x "$bridge_bin"
+        echo "Fehler: HomeKitBridge Binary nicht gefunden: $bridge_bin" >&2
+        return 1
+    end
+
+    set -l tmp_dir (mktemp -d /tmp/homekit-bridge.XXXXXX)
+    if test -z "$tmp_dir"
+        echo "Fehler: Konnte kein temporäres Verzeichnis erstellen." >&2
+        return 1
+    end
+
+    set -l cmd_file "$tmp_dir/command.json"
+    set -l out_file "$tmp_dir/output.json"
+
     # Usage: plug [device] [an|aus|status|toggle]
     #        plug list
     if not set -q argv[1]; or test "$argv[1]" = list
-        echo '{"action": "list"}' >$cmd_file
-        rm -f $out_file
-        open -gj "$app_path"
-        _plug_wait_output; or return 1
+        _plug_write_command $cmd_file list; or begin
+            _plug_cleanup $tmp_dir
+            return 1
+        end
 
-        # Pretty-print device list
+        "$bridge_bin" $cmd_file $out_file >/dev/null 2>&1
+
+        if not test -f $out_file
+            echo "Fehler: Keine Antwort von HomeKitBridge" >&2
+            _plug_cleanup $tmp_dir
+            return 1
+        end
+
         python3 -c "
 import json, sys
-with open('$out_file') as f:
+
+with open(sys.argv[1], encoding='utf-8') as f:
     data = json.load(f)
 if 'error' in data:
     print(f'Fehler: {data.get(\"message\", data[\"error\"])}', file=sys.stderr)
     sys.exit(1)
-for d in sorted(data['devices'], key=lambda x: (x['room'], x['name'])):
+show_home = len({d.get('home', '') for d in data['devices']}) > 1
+for d in sorted(data['devices'], key=lambda x: (x.get('home', ''), x['room'], x['name'])):
     icon = '🟢' if d['on'] else '⚫'
     reach = '' if d['reachable'] else ' (nicht erreichbar)'
-    print(f'{icon} {d[\"room\"]:15s} {d[\"name\"]}{reach}')
-"
-        return
+    location = f\"{d.get('home', '')} / {d['room']}\" if show_home else d['room']
+    print(f'{icon} {location:25s} {d[\"name\"]}{reach}')
+" $out_file
+        set -l status $status
+        _plug_cleanup $tmp_dir
+        return $status
     end
 
     set -l device $argv[1]
@@ -41,38 +66,48 @@ for d in sorted(data['devices'], key=lambda x: (x['room'], x['name'])):
 
     switch "$action"
         case an on
-            echo "{\"action\": \"set\", \"device\": \"$device\", \"value\": true}" >$cmd_file
+            _plug_write_command $cmd_file set $device true
         case aus off
-            echo "{\"action\": \"set\", \"device\": \"$device\", \"value\": false}" >$cmd_file
+            _plug_write_command $cmd_file set $device false
         case status get
-            echo "{\"action\": \"get\", \"device\": \"$device\"}" >$cmd_file
+            _plug_write_command $cmd_file get $device
         case toggle
-            echo "{\"action\": \"toggle\", \"device\": \"$device\"}" >$cmd_file
+            _plug_write_command $cmd_file toggle $device
         case '*'
             echo "Usage: plug [device] [an|aus|status|toggle]"
             echo "       plug list"
+            _plug_cleanup $tmp_dir
             return 1
     end
 
-    rm -f $out_file
-    open "$app_path"
-    _plug_wait_output; or return 1
+    if test $status -ne 0
+        _plug_cleanup $tmp_dir
+        return 1
+    end
 
-    # Parse result
+    "$bridge_bin" $cmd_file $out_file >/dev/null 2>&1
+
+    if not test -f $out_file
+        echo "Fehler: Keine Antwort von HomeKitBridge" >&2
+        _plug_cleanup $tmp_dir
+        return 1
+    end
+
     set -l result (python3 -c "
 import json, sys
-with open('$out_file') as f:
+
+with open(sys.argv[1], encoding='utf-8') as f:
     data = json.load(f)
 if 'error' in data:
     print(f'error:{data.get(\"message\", data[\"error\"])}')
     sys.exit(0)
 on = data.get('on', False)
-toggled = data.get('toggled', False)
-print(f'ok:{\"on\" if on else \"off\"}:{\"toggled\" if toggled else \"set\"}')
-")
+print(f'ok:{\"on\" if on else \"off\"}')
+" $out_file)
 
     if string match -q 'error:*' $result
         echo "Fehler: "(string replace 'error:' '' $result) >&2
+        _plug_cleanup $tmp_dir
         return 1
     end
 
@@ -83,18 +118,31 @@ print(f'ok:{\"on\" if on else \"off\"}:{\"toggled\" if toggled else \"set\"}')
     else
         echo "⚫ $device aus"
     end
+
+    _plug_cleanup $tmp_dir
 end
 
-function _plug_wait_output
-    set -l out_file /tmp/homekit-bridge-output.json
-    set -l tries 0
-    while not test -f $out_file; and test $tries -lt 20
-        sleep 0.3
-        set tries (math $tries + 1)
-    end
-    if not test -f $out_file
-        echo "Fehler: Timeout - keine Antwort von HomeKitBridge" >&2
-        return 1
+function _plug_write_command
+    python3 -c "
+import json, sys
+
+path = sys.argv[1]
+action = sys.argv[2]
+payload = {'action': action}
+
+if len(sys.argv) >= 4:
+    payload['device'] = sys.argv[3]
+if len(sys.argv) >= 5:
+    payload['value'] = sys.argv[4].lower() == 'true'
+
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump(payload, f)
+" $argv
+end
+
+function _plug_cleanup
+    if set -q argv[1]; and test -n "$argv[1]"
+        rm -rf $argv[1]
     end
 end
 

@@ -1,6 +1,26 @@
 import UIKit
 import HomeKit
 
+struct BridgePaths {
+    let commandURL: URL
+    let outputURL: URL
+
+    static func resolve(from arguments: [String] = CommandLine.arguments) -> BridgePaths {
+        let commandURL: URL
+        let outputURL: URL
+
+        if arguments.count >= 3 {
+            commandURL = URL(fileURLWithPath: arguments[1])
+            outputURL = URL(fileURLWithPath: arguments[2])
+        } else {
+            commandURL = URL(fileURLWithPath: "/tmp/homekit-bridge-command.json")
+            outputURL = URL(fileURLWithPath: "/tmp/homekit-bridge-output.json")
+        }
+
+        return BridgePaths(commandURL: commandURL, outputURL: outputURL)
+    }
+}
+
 // MARK: - Command parsing
 
 enum Command {
@@ -9,10 +29,8 @@ enum Command {
     case set(deviceName: String, on: Bool)
     case toggle(deviceName: String)
 
-    static func parse() -> Command {
-        // Read command from file (since `open --args` is unreliable for Catalyst)
-        let commandFile = "/tmp/homekit-bridge-command.json"
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: commandFile)),
+    static func parse(commandURL: URL) -> Command {
+        guard let data = try? Data(contentsOf: commandURL),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let action = json["action"] as? String else {
             return .list
@@ -36,11 +54,10 @@ enum Command {
 
 // MARK: - Output
 
-func writeOutput(_ dict: [String: Any]) {
+func writeOutput(_ dict: [String: Any], to outputURL: URL) {
     guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]),
           let str = String(data: data, encoding: .utf8) else { return }
-    let outputPath = "/tmp/homekit-bridge-output.json"
-    try? str.write(toFile: outputPath, atomically: true, encoding: .utf8)
+    try? str.write(to: outputURL, atomically: true, encoding: .utf8)
 }
 
 func log(_ msg: String) {
@@ -54,18 +71,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate, HMHomeManagerDelegate {
 
     private var homeManager: HMHomeManager?
     private var command: Command = .list
+    private let paths = BridgePaths.resolve()
 
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        command = Command.parse()
+        command = Command.parse(commandURL: paths.commandURL)
         log("Command: \(command)")
         homeManager = HMHomeManager()
         homeManager?.delegate = self
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-            writeOutput(["error": "timeout", "message": "No HomeKit response after 10s"])
+            writeOutput(["error": "timeout", "message": "No HomeKit response after 10s"], to: self.paths.outputURL)
             exit(1)
         }
         return true
@@ -74,112 +92,123 @@ class AppDelegate: UIResponder, UIApplicationDelegate, HMHomeManagerDelegate {
     func homeManagerDidUpdateHomes(_ manager: HMHomeManager) {
         log("Homes loaded: \(manager.homes.count)")
 
-        guard let home = manager.homes.first else {
-            writeOutput(["error": "no_homes"])
+        let homes = manager.homes
+
+        guard !homes.isEmpty else {
+            writeOutput(["error": "no_homes"], to: paths.outputURL)
             exit(1)
-            return
         }
 
         switch command {
         case .list:
-            handleList(home: home)
+            handleList(homes: homes)
         case .get(let name):
-            handleGet(home: home, deviceName: name)
+            handleGet(homes: homes, deviceName: name)
         case .set(let name, let on):
-            handleSet(home: home, deviceName: name, on: on)
+            handleSet(homes: homes, deviceName: name, on: on)
         case .toggle(let name):
-            handleToggle(home: home, deviceName: name)
+            handleToggle(homes: homes, deviceName: name)
         }
     }
 
     // MARK: - Handlers
 
-    private func handleList(home: HMHome) {
-        let devices: [[String: Any]] = home.accessories.compactMap { acc in
-            guard let (svc, char) = findPowerState(accessory: acc) else { return nil }
-            let room = home.rooms.first { $0.accessories.contains(acc) }
-            return [
-                "name": acc.name,
-                "room": room?.name ?? "Default Room",
-                "on": char.value as? Bool ?? false,
-                "reachable": acc.isReachable,
-                "serviceType": svc.serviceType
-            ]
+    private func handleList(homes: [HMHome]) {
+        let devices: [[String: Any]] = homes.flatMap { home in
+            home.accessories.compactMap { acc in
+                guard let (svc, char) = findPowerState(accessory: acc) else { return nil }
+                let room = home.rooms.first { $0.accessories.contains(acc) }
+                return [
+                    "home": home.name,
+                    "name": acc.name,
+                    "room": room?.name ?? "Default Room",
+                    "on": char.value as? Bool ?? false,
+                    "reachable": acc.isReachable,
+                    "serviceType": svc.serviceType
+                ]
+            }
         }
-        writeOutput(["ok": true, "devices": devices])
+        writeOutput(["ok": true, "devices": devices], to: paths.outputURL)
         exit(0)
     }
 
-    private func handleGet(home: HMHome, deviceName: String) {
-        guard let acc = findAccessory(home: home, name: deviceName) else {
-            writeOutput(["error": "not_found", "message": "Device '\(deviceName)' not found"])
+    private func handleGet(homes: [HMHome], deviceName: String) {
+        guard let match = findAccessory(homes: homes, name: deviceName) else {
             exit(1)
-            return
         }
-        guard let (_, char) = findPowerState(accessory: acc) else {
-            writeOutput(["error": "no_power_state", "message": "'\(deviceName)' has no Power State"])
+        guard let (_, char) = findPowerState(accessory: match.accessory) else {
+            writeOutput(["error": "no_power_state", "message": "'\(deviceName)' has no Power State"], to: paths.outputURL)
             exit(1)
-            return
         }
 
         char.readValue { error in
             if let error = error {
-                writeOutput(["error": "read_failed", "message": error.localizedDescription])
+                writeOutput(["error": "read_failed", "message": error.localizedDescription], to: self.paths.outputURL)
                 exit(1)
             }
             let on = char.value as? Bool ?? false
-            writeOutput(["ok": true, "device": deviceName, "on": on])
+            writeOutput(
+                ["ok": true, "device": deviceName, "home": match.home.name, "room": match.roomName, "on": on],
+                to: self.paths.outputURL
+            )
             exit(0)
         }
     }
 
-    private func handleSet(home: HMHome, deviceName: String, on: Bool) {
-        guard let acc = findAccessory(home: home, name: deviceName) else {
-            writeOutput(["error": "not_found", "message": "Device '\(deviceName)' not found"])
+    private func handleSet(homes: [HMHome], deviceName: String, on: Bool) {
+        guard let match = findAccessory(homes: homes, name: deviceName) else {
             exit(1)
-            return
         }
-        guard let (_, char) = findPowerState(accessory: acc) else {
-            writeOutput(["error": "no_power_state", "message": "'\(deviceName)' has no Power State"])
+        guard let (_, char) = findPowerState(accessory: match.accessory) else {
+            writeOutput(["error": "no_power_state", "message": "'\(deviceName)' has no Power State"], to: paths.outputURL)
             exit(1)
-            return
         }
 
         char.writeValue(on) { error in
             if let error = error {
-                writeOutput(["error": "write_failed", "message": error.localizedDescription])
+                writeOutput(["error": "write_failed", "message": error.localizedDescription], to: self.paths.outputURL)
                 exit(1)
             }
-            writeOutput(["ok": true, "device": deviceName, "on": on])
+            writeOutput(
+                ["ok": true, "device": deviceName, "home": match.home.name, "room": match.roomName, "on": on],
+                to: self.paths.outputURL
+            )
             exit(0)
         }
     }
 
-    private func handleToggle(home: HMHome, deviceName: String) {
-        guard let acc = findAccessory(home: home, name: deviceName) else {
-            writeOutput(["error": "not_found", "message": "Device '\(deviceName)' not found"])
+    private func handleToggle(homes: [HMHome], deviceName: String) {
+        guard let match = findAccessory(homes: homes, name: deviceName) else {
             exit(1)
-            return
         }
-        guard let (_, char) = findPowerState(accessory: acc) else {
-            writeOutput(["error": "no_power_state", "message": "'\(deviceName)' has no Power State"])
+        guard let (_, char) = findPowerState(accessory: match.accessory) else {
+            writeOutput(["error": "no_power_state", "message": "'\(deviceName)' has no Power State"], to: paths.outputURL)
             exit(1)
-            return
         }
 
         char.readValue { error in
             if let error = error {
-                writeOutput(["error": "read_failed", "message": error.localizedDescription])
+                writeOutput(["error": "read_failed", "message": error.localizedDescription], to: self.paths.outputURL)
                 exit(1)
             }
             let currentOn = char.value as? Bool ?? false
             let newOn = !currentOn
             char.writeValue(newOn) { error in
                 if let error = error {
-                    writeOutput(["error": "write_failed", "message": error.localizedDescription])
+                    writeOutput(["error": "write_failed", "message": error.localizedDescription], to: self.paths.outputURL)
                     exit(1)
                 }
-                writeOutput(["ok": true, "device": deviceName, "on": newOn, "toggled": true])
+                writeOutput(
+                    [
+                        "ok": true,
+                        "device": deviceName,
+                        "home": match.home.name,
+                        "room": match.roomName,
+                        "on": newOn,
+                        "toggled": true
+                    ],
+                    to: self.paths.outputURL
+                )
                 exit(0)
             }
         }
@@ -187,9 +216,45 @@ class AppDelegate: UIResponder, UIApplicationDelegate, HMHomeManagerDelegate {
 
     // MARK: - Helpers
 
-    private func findAccessory(home: HMHome, name: String) -> HMAccessory? {
+    private struct AccessoryMatch {
+        let home: HMHome
+        let accessory: HMAccessory
+        let roomName: String
+    }
+
+    private func findAccessory(homes: [HMHome], name: String) -> AccessoryMatch? {
         let lower = name.lowercased()
-        return home.accessories.first { $0.name.lowercased() == lower }
+        let matches = homes.flatMap { home in
+            home.accessories.compactMap { accessory -> AccessoryMatch? in
+                guard accessory.name.lowercased() == lower else { return nil }
+                let room = home.rooms.first { $0.accessories.contains(accessory) }
+                return AccessoryMatch(
+                    home: home,
+                    accessory: accessory,
+                    roomName: room?.name ?? "Default Room"
+                )
+            }
+        }
+
+        if matches.isEmpty {
+            writeOutput(["error": "not_found", "message": "Device '\(name)' not found"], to: paths.outputURL)
+            return nil
+        }
+
+        if matches.count > 1 {
+            let locations = matches.map { "\($0.home.name) / \($0.roomName)" }
+            writeOutput(
+                [
+                    "error": "ambiguous_device",
+                    "message": "Device '\(name)' matches multiple accessories",
+                    "matches": locations
+                ],
+                to: paths.outputURL
+            )
+            return nil
+        }
+
+        return matches[0]
     }
 
     /// Find the Outlet/Switch/Lightbulb service with a Power State characteristic
