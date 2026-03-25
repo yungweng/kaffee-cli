@@ -114,22 +114,52 @@ class AppDelegate: UIResponder, UIApplicationDelegate, HMHomeManagerDelegate {
     // MARK: - Handlers
 
     private func handleList(homes: [HMHome]) {
-        let devices: [[String: Any]] = homes.flatMap { home in
-            home.accessories.compactMap { acc in
-                guard let (svc, char) = findPowerState(accessory: acc) else { return nil }
-                let room = home.rooms.first { $0.accessories.contains(acc) }
-                return [
-                    "home": home.name,
-                    "name": acc.name,
-                    "room": room?.name ?? "Default Room",
-                    "on": char.value as? Bool ?? false,
-                    "reachable": acc.isReachable,
-                    "serviceType": svc.serviceType
-                ]
+        struct DeviceSnapshot {
+            let sortKey: String
+            let payload: [String: Any]
+        }
+
+        let candidates = homes.flatMap { home in
+            home.accessories.compactMap { accessory -> (HMHome, HMAccessory, HMService, HMCharacteristic, String)? in
+                guard let (service, characteristic) = findPowerState(accessory: accessory) else { return nil }
+                let room = home.rooms.first { $0.accessories.contains(accessory) }
+                return (home, accessory, service, characteristic, room?.name ?? "Default Room")
             }
         }
-        writeOutput(["ok": true, "devices": devices], to: paths.outputURL)
-        exit(0)
+
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var snapshots: [DeviceSnapshot] = []
+
+        for (home, accessory, service, characteristic, roomName) in candidates {
+            group.enter()
+            characteristic.readValue { _ in
+                let snapshot = DeviceSnapshot(
+                    sortKey: "\(home.name)\u{0}\(roomName)\u{0}\(accessory.name)",
+                    payload: [
+                        "home": home.name,
+                        "name": accessory.name,
+                        "room": roomName,
+                        "on": characteristic.value as? Bool ?? false,
+                        "reachable": accessory.isReachable,
+                        "serviceType": service.serviceType
+                    ]
+                )
+
+                lock.lock()
+                snapshots.append(snapshot)
+                lock.unlock()
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) {
+            let devices = snapshots
+                .sorted { $0.sortKey < $1.sortKey }
+                .map(\.payload)
+            writeOutput(["ok": true, "devices": devices], to: self.paths.outputURL)
+            exit(0)
+        }
     }
 
     private func handleGet(homes: [HMHome], deviceName: String) {
